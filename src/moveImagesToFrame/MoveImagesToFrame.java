@@ -19,7 +19,7 @@ import java.util.TreeSet;
 
 public class MoveImagesToFrame
 {
-  private static final String MOVE_IMAGE_TO_FRAME_VERSION = "v0.10";
+  private static final String MOVE_IMAGE_TO_FRAME_VERSION = "v0.11";
   private static final String MOVE_IMAGE_TO_FRAME_NAME = "MoveImagesToFrame ";
   private static final String SOFTWARE_TYPE = MOVE_IMAGE_TO_FRAME_NAME + MOVE_IMAGE_TO_FRAME_VERSION;
   private static final String[] extensionsToProcess = { ".jpg", ".jpeg", ".jpe" };
