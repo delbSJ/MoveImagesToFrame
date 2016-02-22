@@ -88,7 +88,6 @@ public class PictureFrameFileInfo implements Externalizable, Cloneable
     this.outPS = outPS;
   }
 
-  @SuppressWarnings("null")
   public static TreeMap<String, PictureFrameFileInfo> getFileInfoFromDatabase (File dataBaseDir, PrintStream outPS)
   {
     TreeMap<String, PictureFrameFileInfo> fileInfoFromDatabase = new TreeMap<String, PictureFrameFileInfo> ();
@@ -145,7 +144,6 @@ public class PictureFrameFileInfo implements Externalizable, Cloneable
     return fileInfoFromDatabase;
   }
   
-  @SuppressWarnings("null")
   public static void saveToDataBase (TreeMap<String, PictureFrameFileInfo> totalFileInfo, File dataBaseDir, PrintStream outPS)
   {
     FileOutputStream fo = null;

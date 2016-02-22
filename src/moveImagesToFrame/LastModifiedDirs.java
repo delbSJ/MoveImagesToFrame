@@ -42,7 +42,6 @@ public class LastModifiedDirs implements Externalizable
     this.sourceDirLastModifiedTime = sourceDirLastModifiedTime;
   }
 
-  @SuppressWarnings("null")
   public static LastModifiedDirs getLastModifiedDirsFromDatabase (File dataBaseDir, PrintStream outPS)
   {
     LastModifiedDirs lastModifiedDirsFromDatabase = null;
@@ -86,7 +85,6 @@ public class LastModifiedDirs implements Externalizable
     return lastModifiedDirsFromDatabase;
   }
   
-  @SuppressWarnings("null")
   public static void saveToDataBase (LastModifiedDirs lastModifiedDirsToDatabase, File dataBaseDir, PrintStream outPS)
   {
     FileOutputStream fo = null;
