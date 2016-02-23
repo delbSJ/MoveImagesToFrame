@@ -413,25 +413,31 @@ public class MoveImagesToFrame
     
     warnOfUnknownFrameFiles (uniqueFilesInFrameDir);
 
-    // now that we have a complete list of files on the frame and in the source directory save it
-    PictureFrameFileInfo.saveToDataBase (filesInSourceDir, dataBaseDir, outPS);
-    saveDirsLastModifiedTimeToDatabase (dataBaseDir, frameDir, sourceDir);
-        
+    if (sourceDirModified || frameDirModified) {
+      // only update database if there have been modification, Issue #1
+      // now that we have a complete list of files on the frame and in the source directory save it
+      PictureFrameFileInfo.saveToDataBase (filesInSourceDir, dataBaseDir, outPS);
+      saveDirsLastModifiedTimeToDatabase (dataBaseDir, frameDir, sourceDir);
+    }
     if (!listFilesOnly) {
       // not listing files only, rotate files
+      boolean modified = false;
       if (numFrameDirFiles > 0) {
         // determine which files should be deleted from frame and then new files copied to frame
-        replaceFrameFilesWithSourceFiles (filesInFrameDir, filesInSourceDir, percentageToReplace,
+        modified = replaceFrameFilesWithSourceFiles (filesInFrameDir, filesInSourceDir, percentageToReplace,
           numberBytestoLeaveFree, numSourceDirFiles, numFrameDirFiles, numUniqueFrameDirFiles, sourceDir, frameDir);
       }
       else {
         // there are no known files in frameDir, move as many sourceDir files to the frame as will 'fit'
-        replaceFrameFilesWithSourceFiles (filesInFrameDir, filesInSourceDir, 100.0f, numberBytestoLeaveFree,
+        modified = replaceFrameFilesWithSourceFiles (filesInFrameDir, filesInSourceDir, 100.0f, numberBytestoLeaveFree,
           numSourceDirFiles, numFrameDirFiles, numUniqueFrameDirFiles, sourceDir, frameDir);
       }
-      // finished moving files, update database files
-      PictureFrameFileInfo.saveToDataBase (filesInSourceDir, dataBaseDir, outPS);
-      saveDirsLastModifiedTimeToDatabase (dataBaseDir, frameDir, sourceDir);
+      if (modified) {
+        // finished moving files, update database files
+        // frame or source files changed, update database, Issue # 1
+        PictureFrameFileInfo.saveToDataBase (filesInSourceDir, dataBaseDir, outPS);
+        saveDirsLastModifiedTimeToDatabase (dataBaseDir, frameDir, sourceDir);
+      }
     }
     else {
       // list files only, no rotate of files
@@ -439,7 +445,15 @@ public class MoveImagesToFrame
       outPS.println ();
       listFilesInfo ("not ", filesInSourceDir, false);
     }
-    //displayFilesInfo (filesInSourceDir);
+
+    if (debugMode) {
+      frameDirLastModifiedTime = frameDir.lastModified ();
+      sourceDirLastModifiedTime = sourceDir.lastModified ();
+      // create the frameDir & sourceDir modified time object
+      LastModifiedDirs currDirTimes = new LastModifiedDirs (frameDirLastModifiedTime, sourceDirLastModifiedTime);
+      outPS.printf ("Last modified times of directories: %s%n", currDirTimes);
+    }
+    
     outPS.println ("MoveImagesToFrame Finished");
   }
   
@@ -650,7 +664,7 @@ public class MoveImagesToFrame
     // frameFiles, uniqueFrameFiles);
   }
 
-  private void replaceFrameFilesWithSourceFiles (TreeMap<String, PictureFrameFileInfo> filesInFrameDir,
+  private boolean replaceFrameFilesWithSourceFiles (TreeMap<String, PictureFrameFileInfo> filesInFrameDir,
     TreeMap<String, PictureFrameFileInfo> filesInSourceDir, float percentageToReplace, long numberBytestoLeaveFree,
     int numberOfSourceFiles, int numberOfFrameFiles, int numUniqueFrameDirFiles, File sourceDir, File frameDir)
   {
@@ -724,6 +738,8 @@ public class MoveImagesToFrame
     outPS.printf ("There were originally %,d files on the Frame%n%,d of those files were deleted%n"
       + "%,d files were copied to the frame%n%,d files are now on the Frame%n", numberOfFrameFiles,
       numberOfFilesDeleted, numberOfFilesCopied, numberOfFrameFilesNow);
+    
+    return ((numberOfFilesDeleted > 0 || numberOfFilesCopied > 0) ? true : false);
   }
 
   private boolean copyFileToFrame (PictureFrameFileInfo pictureInfoFileToCopy, File frameDir)
