@@ -8,20 +8,29 @@ import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.GregorianCalendar;
 import java.util.Collection;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
+
 public class MoveImagesToFrame
 {
   private static final String MOVE_IMAGE_TO_FRAME_VERSION = "v0.11";
-  private static final String MOVE_IMAGE_TO_FRAME_NAME = "MoveImagesToFrame ";
-  private static final String SOFTWARE_TYPE = MOVE_IMAGE_TO_FRAME_NAME + MOVE_IMAGE_TO_FRAME_VERSION;
+  private static final String MOVE_IMAGE_TO_FRAME_NAME = "MoveImagesToFrame";
+  private static final String SOFTWARE_TYPE = MOVE_IMAGE_TO_FRAME_NAME + " " + MOVE_IMAGE_TO_FRAME_VERSION;
   private static final String[] extensionsToProcess = { ".jpg", ".jpeg", ".jpe" };
   private static final GregorianCalendar Year2000 = new GregorianCalendar (2000, Calendar.JANUARY , 1, 0, 0, 0);
   private static final long BINARY_MB = 1024L * 1024L;
@@ -32,97 +41,278 @@ public class MoveImagesToFrame
   File dataBaseDir;
   float percentageToReplace;
   long numberBytestoLeaveFree;
-  
+  boolean verboseMode;
+  boolean debugMode;
   /**
    * @param args
    */
   public static void main (String[] args)
   {
-    File frameDir, sourceDir, dataBaseDir;
+    File frameDir = null;
+    File sourceDir = null;
+    File dataBaseDir = null;
     float percentageToReplace = 0.0f;
     PrintStream outPS = System.out;
     Boolean listFilesOnly = Boolean.FALSE;
-
-    if (args.length < 5) {
-      printUsage ("5 arguments are required, only " + args.length + " were specified");
-    }
-    
-    frameDir = new File (args[0]);
-    if (!frameDir.exists ()) {
-      printUsage ("1st parameter, the <Picture Frame Dir>, \"" + args[0] + "\" does not exist");
-    }
-    if (!frameDir.isDirectory ()) {
-      printUsage ("1st parameter, the <Picture Frame Dir>, \"" + args[0] + "\" is not a directory");
-    }
-    
-    sourceDir = new File (args[1]);
-    if (!sourceDir.exists ()) {
-      printUsage ("2nd parameter, the <Source Dir>, \"" + args[1] + "\" does not exist");
-    }
-    if (!sourceDir.isDirectory ()) {
-      printUsage ("2nd parameter, the <Source Dir>, \"" + args[1] + "\" is not a directory");
-    }
-    
-    try {
-      Integer rawPercent = Integer.valueOf (args[2]);
-      if (rawPercent < 1 || rawPercent > 100) {
-        printUsage ("3rd parameter, the <% to Change>, \"" + args[2] + "\" is not within range of 1 to 100");
-      }
-      percentageToReplace = (float) (rawPercent / 100.0);
-    }
-    catch (NumberFormatException e) {
-      printUsage ("3rd parameter, the <% to Change>, \"" + args[2] + "\" is not a valid number");
-    }
-    
-    dataBaseDir = new File (args[3]);
-    if (!dataBaseDir.exists ()) {
-      printUsage ("4th parameter, the <Database Dir>, \"" + args[3] + "\" does not exist");
-    }
-    if (!dataBaseDir.isDirectory ()) {
-      printUsage ("4th parameter, the <Database Dir>, \"" + args[3] + "\" is not a directory");
-    }
-    
-    long frameDirTotalSpace = frameDir.getTotalSpace ();
+    boolean debugMode = false;
+    boolean verboseMode = true;
+    CommandLine cmdLineParms = null;
+    long frameDirTotalSpace = 0L;
     long numberBytestoLeaveFree = 0L;
-    try {
-      numberBytestoLeaveFree = Long.valueOf (args[4]);
-      numberBytestoLeaveFree *= BINARY_MB;
-      if (frameDirTotalSpace < numberBytestoLeaveFree) {
-        printUsage (String.format ("5th parameter, the <Megabytes to leave free>, \"%,d\" is larger than "
-          + "the frame's total space of %,d bytes.", args[4], frameDirTotalSpace));
+    SimpleDateFormat dateFormat = new SimpleDateFormat ("yyyy-MM-dd HH:mm:ss.SSS z");
+
+    if ((args.length > 0) && (!args[0].startsWith("-"))) {
+      // there is at least one command line parameter and it does NOT start with a "-",
+      // use backward compatible positional command line parameters
+      if (args.length < 5) {
+        printUsage(outPS, "5 arguments are required, only " + args.length + " were specified");
       }
-    }
-    catch (NumberFormatException e) {
-      printUsage ("5th parameter, the <Megabytes to leave free> \"" + args[4] + "\" is not a valid number");
-    }
-    
-    if (args.length >= 6) {
-      // a log file has been entered, open it for append
+      frameDir = new File(args[0]);
+      if (!frameDir.exists()) {
+        printUsage(outPS, "1st parameter, the <Picture Frame Dir>, \"" + args[0] + "\" does not exist");
+      }
+      if (!frameDir.isDirectory()) {
+        printUsage(outPS, "1st parameter, the <Picture Frame Dir>, \"" + args[0] + "\" is not a directory");
+      }
+      sourceDir = new File(args[1]);
+      if (!sourceDir.exists()) {
+        printUsage(outPS, "2nd parameter, the <Source Dir>, \"" + args[1] + "\" does not exist");
+      }
+      if (!sourceDir.isDirectory()) {
+        printUsage(outPS, "2nd parameter, the <Source Dir>, \"" + args[1] + "\" is not a directory");
+      }
       try {
-        outPS = new PrintStream (new FileOutputStream (args[5], true), true);
+        Integer rawPercent = Integer.valueOf(args[2]);
+        if (rawPercent < 1 || rawPercent > 100) {
+          printUsage(outPS, "3rd parameter, the <% to Change>, \"" + args[2] + "\" is not within range of 1 to 100");
+        }
+        percentageToReplace = (float) (rawPercent / 100.0);
+      } catch (NumberFormatException e) {
+        printUsage(outPS, "3rd parameter, the <% to Change>, \"" + args[2] + "\" is not a valid number");
       }
-      catch (FileNotFoundException e) {
-        printUsage (String.format ("Could not open Log File \"%s\": %s%n", args[5], e.toString ()));
+      dataBaseDir = new File(args[3]);
+      if (!dataBaseDir.exists()) {
+        printUsage(outPS, "4th parameter, the <Database Dir>, \"" + args[3] + "\" does not exist");
+      }
+      if (!dataBaseDir.isDirectory()) {
+        printUsage(outPS, "4th parameter, the <Database Dir>, \"" + args[3] + "\" is not a directory");
+      }
+      frameDirTotalSpace = frameDir.getTotalSpace ();
+      numberBytestoLeaveFree = 0L;
+      try {
+        numberBytestoLeaveFree = Long.valueOf (args[4]);
+        numberBytestoLeaveFree *= BINARY_MB;
+        if (frameDirTotalSpace < numberBytestoLeaveFree) {
+          printUsage (outPS, String.format ("5th parameter, the <Megabytes to leave free>, \"%,d\" is larger than "
+              + "the frame's total space of %,d bytes.", args[4], frameDirTotalSpace));
+        }
+      } catch (NumberFormatException e) {
+        printUsage (outPS, "5th parameter, the <Megabytes to leave free> \"" + args[4] + "\" is not a valid number");
+      }
+      if (args.length >= 6) {
+        // a log file has been entered, open it for append
+        try {
+          outPS = new PrintStream(new FileOutputStream(args[5], true), true);
+        } catch (FileNotFoundException e) {
+          printUsage(outPS, String.format("Could not open Log File \"%s\": %s%n", args[5], e.toString()));
+        }
+      }
+      if (args.length >= 7) {
+        // listFilesOnly has been entered, read it
+        listFilesOnly = Boolean.valueOf(args[6]);
+      } 
+    }
+    else {
+      // use Apache Commons CLI to parse keyword command line parameters
+      if (args.length == 0) {
+        printUsage(outPS, "5 arguments are required, only " + args.length + " were specified");
+      }
+      
+      String cmdArg = null;
+      cmdLineParms = processKeywordParms (args);
+      // did user ask for version?
+      if (cmdLineParms.hasOption ('v')) {
+        // print version and exit
+        outPS.println (SOFTWARE_TYPE);
+        System.exit (18);
+      }
+      if (cmdLineParms.hasOption ('?') || cmdLineParms.hasOption ("help")) {
+        printHelpAndExit (outPS);
+      }
+      if (cmdLineParms.hasOption ("log")) {
+        // a log file has been entered, open it for append
+        cmdArg = cmdLineParms.getOptionValue ("log");
+        try {
+          outPS = new PrintStream(new FileOutputStream(cmdArg, true), true);
+        } catch (FileNotFoundException e) {
+          parmInvalid (outPS, "Optional", "-log, Log File", cmdArg, e.toString ());
+        }
+      }
+      if (cmdLineParms.hasOption ('D')) {
+        debugMode = true;
+      }
+      if (cmdLineParms.hasOption ('d')) {
+        // Required Parameter, -d, Database directory
+        cmdArg = cmdLineParms.getOptionValue ('d');
+        dataBaseDir = new File (cmdArg);
+        if (!dataBaseDir.exists()) {
+          parmInvalid (outPS, "Required", "-d, Database directory", cmdArg, "directory doesn't exist");
+        }
+        if (!dataBaseDir.isDirectory()) {
+          parmInvalid (outPS, "Required", "-d, Database directory", cmdArg, "isn't a directory");
+        }
+      }
+      else {
+        // required Parameter missing
+        requiredParmMissing (outPS, "-d, Database directory");
+      }
+      if (cmdLineParms.hasOption ('f')) {
+        // Required Parameter, -f, Frame directory
+        cmdArg = cmdLineParms.getOptionValue ('f');
+        frameDir = new File (cmdArg);
+        if (!frameDir.exists()) {
+          parmInvalid (outPS, "Required", "-f, Frame directory", cmdArg, "directory doesn't exist");
+        }
+        if (!frameDir.isDirectory()) {
+          parmInvalid (outPS, "Required", "-f, Frame directory", cmdArg, "isn't a directory");
+        }
+      }
+      else {
+        // required Parameter missing
+        requiredParmMissing (outPS, "-f, Frame directory");
+      }
+      if (cmdLineParms.hasOption ('m')) {
+        // Required Parameter, -m, number of Megabytes to leave free on frame
+        cmdArg = cmdLineParms.getOptionValue ('m');
+        frameDirTotalSpace = frameDir.getTotalSpace ();
+        numberBytestoLeaveFree = 0L;
+        try {
+          numberBytestoLeaveFree = Long.valueOf (cmdArg);
+          numberBytestoLeaveFree *= BINARY_MB;
+          if (frameDirTotalSpace < numberBytestoLeaveFree) {
+            parmInvalid (outPS, "Required", "-m, number of Megabytes to leave free on frame", cmdArg, 
+                String.format ("is larger than the frame's total space of %,d bytes.", frameDirTotalSpace));
+          }
+        } catch (NumberFormatException e) {
+          parmInvalid (outPS, "Required", "-m, number of Megabytes to leave free on frame", cmdArg,
+              "is not a valid number");
+        }
+      }
+      else {
+        // required Parameter missing
+        requiredParmMissing (outPS, "-m, number of Megabytes to leave free on frame");
+      }
+      if (cmdLineParms.hasOption ('p')) {
+        // Required Parameter, -p, % of frame images to change
+        cmdArg = cmdLineParms.getOptionValue ('p');
+        try {
+          Integer rawPercent = Integer.valueOf(cmdArg);
+          if (rawPercent < 1 || rawPercent > 100) {
+            parmInvalid (outPS, "Required", "-p, % of frame images to change", cmdArg,
+                "is not within range of 1 to 100");
+          }
+          percentageToReplace = ((float) rawPercent) / 100.0f;
+        } catch (NumberFormatException e) {
+          parmInvalid (outPS, "Required", "-p, % of frame images to change", cmdArg,
+              "is not a valid number");
+        }
+      }
+      if (cmdLineParms.hasOption ('q')) {
+        verboseMode = false;
+      }
+      if (cmdLineParms.hasOption ('l')) {
+        listFilesOnly = Boolean.TRUE;
+        // if user has asked for list files only make sure verbose mode is true
+        verboseMode = true;
+      }
+      if (cmdLineParms.hasOption ('s')) {
+        // Required Parameter, -s, image Source Directory
+        cmdArg = cmdLineParms.getOptionValue ('s');
+        sourceDir = new File (cmdArg);
+        if (!sourceDir.exists()) {
+          parmInvalid (outPS, "Required", "-s, image Source Directory", cmdArg, "directory doesn't exist");
+        }
+        if (!sourceDir.isDirectory()) {
+          parmInvalid (outPS, "Required", "-s, image Source Directory", cmdArg, "isn't a directory");
+        }
+      }
+      else {
+        // required Parameter missing
+        requiredParmMissing (outPS, "-s, image Source Directory");
       }
     }
     
-    if (args.length >= 7) {
-      // listFilesOnly has been entered, read it
-      listFilesOnly = Boolean.valueOf (args[6]);
+    if (verboseMode) {
+      String currDate = dateFormat.format (new Date (System.currentTimeMillis ()));
+      outPS.printf (
+          "%s %s%n<Picture Frame Dir> is \"%s\", <Source Dir> is \"%s\", <%% to Change> is %d%% "
+              + "%n<Database Dir> is \"%s\"%n<Megabytes to leave free> is %,d, Frames's total space that can be used "
+              + "is %,d%nList Files Only = %s, debugMode = %s%n",
+          SOFTWARE_TYPE, currDate, frameDir.toPath ().toString (), sourceDir.toPath ().toString (),
+          ((int) (percentageToReplace * 100.0f)), dataBaseDir.toPath ().toString (),
+          (numberBytestoLeaveFree / BINARY_MB), frameDirTotalSpace, listFilesOnly, debugMode);
     }
-    
-    outPS.println ("----------------------------------------------------------------");
-    outPS.printf ("%s%n<Picture Frame Dir> is \"%s\", <Source Dir> is \"%s\", <%% to Change> is %d%% "
-      + "%n<Database Dir> is \"%s\"%n<Megabytes to leave free> is %s, Frames's total space that can be used "
-      + "is %,d%nList Files Only = %s%n", SOFTWARE_TYPE, args[0], args[1], ((int) (percentageToReplace * 100.0f)),
-      dataBaseDir, args[4], frameDirTotalSpace, listFilesOnly);
-    
     MoveImagesToFrame moveImagesToFrame = new MoveImagesToFrame (outPS, frameDir, sourceDir, dataBaseDir,
-      percentageToReplace, numberBytestoLeaveFree);
+      percentageToReplace, numberBytestoLeaveFree, verboseMode, debugMode);
     
     moveImagesToFrame.rotateFiles (listFilesOnly);
+    outPS.println ("----------------------------------------------------------------");
+  }
+
+  private static void parmInvalid (PrintStream outPS, String typeParm, String cmdStr, String arg, String error) {
+    outPS.printf ("%s parameter \"%s\", argument \"%s\" is invalid, \"%s\", can't continue.%n%n", typeParm, cmdStr, arg,
+        error);
+    printHelpAndExit (outPS);
+  }
+
+  private static void requiredParmMissing (PrintStream outPS, String cmdStr) {
+    outPS.printf ("Required parameter \"%s\", not specified, can't continue.%n%n", cmdStr);
+    printHelpAndExit (outPS);
+  }
+
+  private static void printHelpAndExit (PrintStream outPS) {
+    // print help and exit
+    HelpFormatter formatter = new HelpFormatter();
+    Options options = getCmdLineOptions ();
+    formatter.printHelp( MOVE_IMAGE_TO_FRAME_NAME, options );
+    System.exit (8);
   }
   
+  private static CommandLine processKeywordParms (String[] args) {
+    CommandLineParser parser = new DefaultParser ();
+    CommandLine cmdLine = null;
+    Options options = getCmdLineOptions ();
+
+    try {
+      // parse the command line arguments
+      cmdLine = parser.parse (options, args);
+    } catch (ParseException e) {
+      // oops, something went wrong
+      System.out.printf ("Command Line Parsing failed.  Reason: %s%n", e.toString ());
+      System.exit (20);
+    }
+
+    return cmdLine;
+  }
+
+  private static Options getCmdLineOptions () {
+    // define the option we support
+    Options options = new Options ();
+    options.addOption ("?", false, "print this message");
+    options.addOption ("help", false, "print this message");
+    options.addOption ("v", "version", false, "print the version information and exit");
+    options.addOption ("q", "quiet", false, "quiet mode, most output not displayed");
+    options.addOption ("D", "Debug", false, "print debugging information");
+    options.addOption ("f", "frame-dir", true, "Picture Frame Directory (Required)");
+    options.addOption ("s", "source-dir", true, "image Source Directory (Required)");
+    options.addOption ("p", "percent", true, "% of frame images to change (1-100) (Required)");
+    options.addOption ("d", "database-dir", true, "Database directory (Required)");
+    options.addOption ("m", "megabytes-free", true, "number of Megabytes to leave free on frame (Required)");
+    options.addOption ("l", "list-files-only", false, "list files only (frame & source), don't rotate files");
+    options.addOption ("log", true, "log file to append all output to");
+    return options;
+  }
+
   /**
    * @param outPS
    * @param frameDir
@@ -130,9 +320,11 @@ public class MoveImagesToFrame
    * @param dataBaseDir
    * @param percentageToReplace
    * @param numberBytestoLeaveFree
+   * @param verboseMode
+   * @param debugMode
    */
   public MoveImagesToFrame (PrintStream outPS, File frameDir, File sourceDir, File dataBaseDir,
-    float percentageToReplace, long numberBytestoLeaveFree)
+    float percentageToReplace, long numberBytestoLeaveFree, boolean verboseMode, boolean debugMode)
   {
     this.outPS = outPS;
     this.frameDir = frameDir;
@@ -140,6 +332,8 @@ public class MoveImagesToFrame
     this.dataBaseDir = dataBaseDir;
     this.percentageToReplace = percentageToReplace;
     this.numberBytestoLeaveFree = numberBytestoLeaveFree;
+    this.verboseMode = verboseMode;
+    this.debugMode = debugMode;
   }
 
   private void rotateFiles (boolean listFilesOnly)
@@ -158,28 +352,33 @@ public class MoveImagesToFrame
     // try to compare last modified times for frameDir & sourceDir
     if ((lastModifiedDirs = LastModifiedDirs.getLastModifiedDirsFromDatabase (dataBaseDir, outPS)) != null) {
       // we were able to get the LastModifiedDirs from the data base, compare last run to current run
+      if (debugMode) {
+        outPS.printf ("Last modified times from database:    %s%n", lastModifiedDirs);
+        LastModifiedDirs currDirTimes = new LastModifiedDirs (frameDirLastModifiedTime, sourceDirLastModifiedTime);
+        outPS.printf ("Last modified times from directories: %s%n", currDirTimes);
+      }
       if (frameDirLastModifiedTime != lastModifiedDirs.getFrameDirLastModifiedTime ()) {
         // frameDir has been modified since last run
         frameDirModified = true;
-        if (listFilesOnly) {
+        if (listFilesOnly || debugMode) {
           outPS.println ("The Frame Dir has been modified since the last run.");
         }
       }
       if (sourceDirLastModifiedTime != lastModifiedDirs.getSourceDirLastModifiedTime ()) {
         // frameDir has been modified since last run
         sourceDirModified = true;
-        if (listFilesOnly) {
+        if (listFilesOnly || debugMode) {
           outPS.println ("The Source Dir has been modified since the last run.");
         }
       }
     }
     
     // try to get file information from dataBase directory
-    outPS.println ("Read the Picture Frame File Info Database");
+    outputIfVerbose ("Read the Picture Frame File Info Database%n");
     filesInSourceDir = PictureFrameFileInfo.getFileInfoFromDatabase (dataBaseDir, outPS);
     if (filesInSourceDir.isEmpty ()) {
       // the Database does not exist, get a list of all files in the source directory
-      outPS.println ("Picture Frame File Info Database did not exist, scanning Source Dir");
+      outputIfVerbose ("Picture Frame File Info Database did not exist, scanning Source Dir%n");
       filesInSourceDir = scanDirectory (sourceDir, true);
       sourceDirModified = false; // ignore sourceDirModified since we just read all of sourceDir
     }
@@ -200,7 +399,7 @@ public class MoveImagesToFrame
 
     if (filesInFrameDir.isEmpty ()) {
       // the File Info on the Source indicates there are no known files in the Frame, extract the file info from frame
-      outPS.println ("File Info from the Frame doesn't exist, scanning Frame Dir");
+      outputIfVerbose ("File Info from the Frame doesn't exist, scanning Frame Dir%n");
       // get a list of all files in the frame directory
       filesInFrameDir = scanDirectory (frameDir, false);
       mergePictureFrameFileInfo (filesInFrameDir, filesInSourceDir, uniqueFilesInFrameDir, false);
@@ -209,30 +408,36 @@ public class MoveImagesToFrame
     numUniqueFrameDirFiles = uniqueFilesInFrameDir.size ();
     numSourceDirFiles = filesInSourceDir.size () - numUniqueFrameDirFiles;
     numFrameDirFiles = filesInFrameDir.size ();
-    outPS.printf ("Number of sourceDir files: %d, Number of frameDir files: %d, Number of Unique frameDir "
+    outputIfVerbose ("Number of sourceDir files: %d, Number of frameDir files: %d, Number of Unique frameDir "
     + "files: %d%n", numSourceDirFiles, numFrameDirFiles, numUniqueFrameDirFiles);
     
     warnOfUnknownFrameFiles (uniqueFilesInFrameDir);
 
-    // now that we have a complete list of files on the frame and in the source directory save it
-    PictureFrameFileInfo.saveToDataBase (filesInSourceDir, dataBaseDir, outPS);
-    saveDirsLastModifiedTimeToDatabase (dataBaseDir, frameDir, sourceDir);
-        
+    if (sourceDirModified || frameDirModified) {
+      // only update database if there have been modification, Issue #1
+      // now that we have a complete list of files on the frame and in the source directory save it
+      PictureFrameFileInfo.saveToDataBase (filesInSourceDir, dataBaseDir, outPS);
+      saveDirsLastModifiedTimeToDatabase (dataBaseDir, frameDir, sourceDir);
+    }
     if (!listFilesOnly) {
       // not listing files only, rotate files
+      boolean modified = false;
       if (numFrameDirFiles > 0) {
         // determine which files should be deleted from frame and then new files copied to frame
-        replaceFrameFilesWithSourceFiles (filesInFrameDir, filesInSourceDir, percentageToReplace,
+        modified = replaceFrameFilesWithSourceFiles (filesInFrameDir, filesInSourceDir, percentageToReplace,
           numberBytestoLeaveFree, numSourceDirFiles, numFrameDirFiles, numUniqueFrameDirFiles, sourceDir, frameDir);
       }
       else {
         // there are no known files in frameDir, move as many sourceDir files to the frame as will 'fit'
-        replaceFrameFilesWithSourceFiles (filesInFrameDir, filesInSourceDir, 100.0f, numberBytestoLeaveFree,
+        modified = replaceFrameFilesWithSourceFiles (filesInFrameDir, filesInSourceDir, 100.0f, numberBytestoLeaveFree,
           numSourceDirFiles, numFrameDirFiles, numUniqueFrameDirFiles, sourceDir, frameDir);
       }
-      // finished moving files, update database files
-      PictureFrameFileInfo.saveToDataBase (filesInSourceDir, dataBaseDir, outPS);
-      saveDirsLastModifiedTimeToDatabase (dataBaseDir, frameDir, sourceDir);
+      if (modified) {
+        // finished moving files, update database files
+        // frame or source files changed, update database, Issue # 1
+        PictureFrameFileInfo.saveToDataBase (filesInSourceDir, dataBaseDir, outPS);
+        saveDirsLastModifiedTimeToDatabase (dataBaseDir, frameDir, sourceDir);
+      }
     }
     else {
       // list files only, no rotate of files
@@ -240,7 +445,15 @@ public class MoveImagesToFrame
       outPS.println ();
       listFilesInfo ("not ", filesInSourceDir, false);
     }
-    //displayFilesInfo (filesInSourceDir);
+
+    if (debugMode) {
+      frameDirLastModifiedTime = frameDir.lastModified ();
+      sourceDirLastModifiedTime = sourceDir.lastModified ();
+      // create the frameDir & sourceDir modified time object
+      LastModifiedDirs currDirTimes = new LastModifiedDirs (frameDirLastModifiedTime, sourceDirLastModifiedTime);
+      outPS.printf ("Last modified times of directories: %s%n", currDirTimes);
+    }
+    
     outPS.println ("MoveImagesToFrame Finished");
   }
   
@@ -271,16 +484,31 @@ public class MoveImagesToFrame
     if (uniqueFilesInFrameDir.size () > 0) {
       Collection<PictureFrameFileInfo> frameFileInfo = uniqueFilesInFrameDir.values ();
       // warn that the unique files currently in the Frame will not be removed
-      outPS.printf ("Warning: the following %d file(s) that are in the Picture Frame are unknown and will not"
+      outputIfVerbose ("Warning: the following %d file(s) that are in the Picture Frame are unknown and will not"
         + " be deleted to make room for new files%n", uniqueFilesInFrameDir.size ());
       for (PictureFrameFileInfo aFile : frameFileInfo) {
-        outPS.println (aFile.getFilenameOnFrame ());
+        outputIfVerbose (aFile.getFilenameOnFrame ());
+        outputIfVerbose ("%n");
       }
       // now empty the list of unique files in the Picture Frame, we can't remove them for space for new files
       uniqueFilesInFrameDir.clear ();
     }
   }
   
+  private void outputIfVerbose (String formatString, Object...args) {
+    if (verboseMode) {
+      // verbose is true, output the format string and any arguments
+      outPS.printf (formatString, args);
+    }
+  }
+  
+  private void outputIfDebug (String debugFormatString, Object...args) {
+    if (debugMode) {
+      // debug mode is true, output the debug Format string
+      outPS.printf (debugFormatString, args);
+    }
+  }
+
   private void mergePictureFrameFileInfo (TreeMap<String, PictureFrameFileInfo> fromMap,
     TreeMap<String, PictureFrameFileInfo> toMap, TreeMap<String, PictureFrameFileInfo> uniqueFilesInFrameDir,
     boolean fromMapIsSrc)
@@ -315,7 +543,7 @@ public class MoveImagesToFrame
     long picturesProcessed = 0;
     
     // if (updateToMap) {
-    outPS.println ("Starting merge of picture frame file info");
+    outputIfVerbose ("Starting merge of picture frame file info%n");
     tempMap = getDataAboutFromMapWithinToMap (toMap, fromMapIsSrc);
     for (PictureFrameFileInfo fromMapRecord : fromMap.values ()) {
       ++fromMapRead;
@@ -383,7 +611,7 @@ public class MoveImagesToFrame
       toMap.remove (toBeDeleted.getFileNameKey ());
     }
     
-    outPS.printf ("Completed merge of picture frame file info, %d input records read, %d records updated, " 
+    outputIfVerbose ("Completed merge of picture frame file info, %d input records read, %d records updated, " 
     + "%d records added and %d records deleted.%n", fromMapRead, toMapUpdates, toMapAdded, toMapDeleted);
   }
 
@@ -412,7 +640,7 @@ public class MoveImagesToFrame
   private long incrPicturesProcessed (long picturesProcessed)
   {
     if ((++picturesProcessed % 1000) == 0) {
-      outPS.printf ("%d%n", picturesProcessed);
+      outputIfVerbose ("%d%n", picturesProcessed);
     }
     return picturesProcessed;
   }
@@ -420,7 +648,7 @@ public class MoveImagesToFrame
   private void extractFrameFileInfo (TreeMap<String, PictureFrameFileInfo> filesInSourceDir,
     TreeMap<String, PictureFrameFileInfo> frameFileInfoMap, TreeMap<String, PictureFrameFileInfo> uniqueFrameFileInfoMap)
   {
-    outPS.println ("Extract information on images on the Picture Frame");
+    outputIfVerbose ("Extract information on images on the Picture Frame%n");
     Collection<PictureFrameFileInfo> pictureFrameFileInfoCollection = filesInSourceDir.values ();
     for (PictureFrameFileInfo pictureFrameFileInfo : pictureFrameFileInfoCollection) {
       if (pictureFrameFileInfo.isOnFrame ()) {
@@ -436,7 +664,7 @@ public class MoveImagesToFrame
     // frameFiles, uniqueFrameFiles);
   }
 
-  private void replaceFrameFilesWithSourceFiles (TreeMap<String, PictureFrameFileInfo> filesInFrameDir,
+  private boolean replaceFrameFilesWithSourceFiles (TreeMap<String, PictureFrameFileInfo> filesInFrameDir,
     TreeMap<String, PictureFrameFileInfo> filesInSourceDir, float percentageToReplace, long numberBytestoLeaveFree,
     int numberOfSourceFiles, int numberOfFrameFiles, int numUniqueFrameDirFiles, File sourceDir, File frameDir)
   {
@@ -481,7 +709,7 @@ public class MoveImagesToFrame
       if (success) {
         ++numberOfFilesDeleted;
         pictureInfo.setFilenameOnFrame (null);
-        outPS.printf ("Successfully deleted Frame file \"%s\" to make room for new files%n", fileName);
+        outputIfVerbose ("Successfully deleted Frame file \"%s\" to make room for new files%n", fileName);
       }
     }
     
@@ -503,13 +731,15 @@ public class MoveImagesToFrame
       if (success) {
         ++numberOfFilesCopied;
         fileName = pictureInfo.getFullyQualifiedSourceFilename ();
-        outPS.printf ("Successfully copied Source file \"%s\" to Frame%n", fileName);
+        outputIfVerbose ("Successfully copied Source file \"%s\" to Frame%n", fileName);
       }
     }
     int numberOfFrameFilesNow = numberOfFrameFiles - numberOfFilesDeleted + numberOfFilesCopied;
     outPS.printf ("There were originally %,d files on the Frame%n%,d of those files were deleted%n"
       + "%,d files were copied to the frame%n%,d files are now on the Frame%n", numberOfFrameFiles,
       numberOfFilesDeleted, numberOfFilesCopied, numberOfFrameFilesNow);
+    
+    return ((numberOfFilesDeleted > 0 || numberOfFilesCopied > 0) ? true : false);
   }
 
   private boolean copyFileToFrame (PictureFrameFileInfo pictureInfoFileToCopy, File frameDir)
@@ -558,7 +788,7 @@ public class MoveImagesToFrame
     
     processDirStructure (pictureFrameFileInfoMap, directoriesToProcess, sourceScan);
     
-    outPS.println ("Finished Scan");
+    outputIfVerbose ("Finished Scan%n");
     return pictureFrameFileInfoMap;
   }
 
@@ -573,7 +803,7 @@ public class MoveImagesToFrame
     long lastOnFrameInitialTime = 1L;
     long dateMovedToFrame = System.currentTimeMillis ();
     
-    outPS.printf ("Starting scan of the %s directory%n", (sourceScan ? "Source" : "Frame"));
+    outputIfVerbose ("Starting scan of the %s directory%n", (sourceScan ? "Source" : "Frame"));
     // recursively process directories looking for jpg files
     while (!directoriesToProcess.isEmpty ()) {
       // get (and remove) 1st in Sorted Set (TreeSet)
@@ -628,27 +858,29 @@ public class MoveImagesToFrame
     }
   }
 
-  private static void printUsage (String message)
+  private static void printUsage (PrintStream outPS, String message)
   {
-    System.out.printf ("Usage Error (%s): %s%n", SOFTWARE_TYPE, message);
-    System.out.println ("Usage:MoveImagesToFrame <Picture Frame Dir> <Source Dir> <% to Change> "
+    outPS.println ("Positional Command Line Parameters:");
+    outPS.printf ("Usage Error (%s): %s%n", SOFTWARE_TYPE, message);
+    outPS.println ("Usage:MoveImagesToFrame <Picture Frame Dir> <Source Dir> <% to Change> "
       + "<Database Dir> <Megabytes to leave free> [Log File]");
-    System.out.println ("  Where:");
-    System.out.println ("    \"Picture Frame Dir\" = The fully qualified path to the directory on the Picture Frame "
+    outPS.println ("  Where:");
+    outPS.println ("    \"Picture Frame Dir\" = The fully qualified path to the directory on the Picture Frame "
       + "to copy images");
-    System.out.println ("    \"Source Dir\" = The fully qualified path to the directory containing the images to "
+    outPS.println ("    \"Source Dir\" = The fully qualified path to the directory containing the images to "
       + "rotate to the Picture Frame");
-    System.out.println ("    \"% to Change\" = The percentage of the photos on the Picture Frame to replace, "
+    outPS.println ("    \"% to Change\" = The percentage of the photos on the Picture Frame to replace, "
         + "a number between 1 and 100");
-    System.out.println ("    \"Database Dir\" = The fully qualified path to the directory where the program "
+    outPS.println ("    \"Database Dir\" = The fully qualified path to the directory where the program "
         + "can store information about the files in <Picture Frame Dir> and <Source Dir>");
-    System.out.println ("    \"Megabytes to leave free\" = The number of MegaBytes (1,048,576 bytes) to leave free "
+    outPS.println ("    \"Megabytes to leave free\" = The number of MegaBytes (1,048,576 bytes) to leave free "
         + "on the frame for other picture sources");
-    System.out.println ("    \"Log File\" = (Optional) The Log File, (default: console (DOS box)) all output will " 
+    outPS.println ("    \"Log File\" = (Optional) The Log File, (default: console (DOS box)) all output will " 
         + "be appended to this file.");
-    System.out.println ("    \"List Files Only\" = (Optional, default: false) Only list the files on frame and "
+    outPS.println ("    \"List Files Only\" = (Optional, default: false) Only list the files on frame and "
       + "Source Dir");
-    System.exit (8);
+    outPS.printf ("%nKeyword Command Line Parameters%n");
+    printHelpAndExit (outPS);
   }
 }
 
