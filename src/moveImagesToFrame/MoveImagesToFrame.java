@@ -301,14 +301,14 @@ public class MoveImagesToFrame
     options.addOption ("?", false, "print this message");
     options.addOption ("help", false, "print this message");
     options.addOption ("v", "version", false, "print the version information and exit");
-    options.addOption ("q", "quiet", false, "quiet mode");
+    options.addOption ("q", "quiet", false, "quiet mode, most output not displayed");
     options.addOption ("D", "Debug", false, "print debugging information");
     options.addOption ("f", "frame-dir", true, "Picture Frame Directory (Required)");
     options.addOption ("s", "source-dir", true, "image Source Directory (Required)");
     options.addOption ("p", "percent", true, "% of frame images to change (1-100) (Required)");
     options.addOption ("d", "database-dir", true, "Database directory (Required)");
     options.addOption ("m", "megabytes-free", true, "number of Megabytes to leave free on frame (Required)");
-    options.addOption ("l", "list-files-only", false, "list files only, don't rotate files");
+    options.addOption ("l", "list-files-only", false, "list files only (frame & source), don't rotate files");
     options.addOption ("log", true, "log file to append all output to");
     return options;
   }
