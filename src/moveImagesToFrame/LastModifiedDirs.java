@@ -192,7 +192,7 @@ public class LastModifiedDirs implements Externalizable
   @Override
   public String toString ()
   {
-    SimpleDateFormat dateFormat = new SimpleDateFormat ("yyyy-MM-dd HH:mm:ss.S z");
+    SimpleDateFormat dateFormat = new SimpleDateFormat ("yyyy-MM-dd HH:mm:ss.SSS z");
     StringBuilder builder = new StringBuilder ();
     builder.append ("LastModifiedDirs [frameDirLastModifiedTime=");
     builder.append (dateFormat.format (new Date (frameDirLastModifiedTime)));
