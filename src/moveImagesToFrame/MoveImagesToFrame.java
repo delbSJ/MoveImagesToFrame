@@ -26,9 +26,11 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
+import gui.MainWindow;
+
 public class MoveImagesToFrame
 {
-  private static final String MOVE_IMAGE_TO_FRAME_VERSION = "v0.11";
+  private static final String MOVE_IMAGE_TO_FRAME_VERSION = "v0.11.0";
   private static final String MOVE_IMAGE_TO_FRAME_NAME = "MoveImagesToFrame";
   private static final String SOFTWARE_TYPE = MOVE_IMAGE_TO_FRAME_NAME + " " + MOVE_IMAGE_TO_FRAME_VERSION;
   private static final String[] extensionsToProcess = { ".jpg", ".jpeg", ".jpe" };
@@ -125,7 +127,15 @@ public class MoveImagesToFrame
     else {
       // use Apache Commons CLI to parse keyword command line parameters
       if (args.length == 0) {
-        printUsage(outPS, "5 arguments are required, only " + args.length + " were specified");
+        // use the GUI
+        try {
+          MainWindow window = new MainWindow ();
+          window.open ();
+        } catch (Exception e) {
+          System.out.println (e.toString ());
+          e.printStackTrace ();
+        }
+        System.exit (0); // done
       }
       
       String cmdArg = null;
@@ -881,6 +891,11 @@ public class MoveImagesToFrame
       + "Source Dir");
     outPS.printf ("%nKeyword Command Line Parameters%n");
     printHelpAndExit (outPS);
+  }
+  
+  public static String getVersion ()
+  {
+    return SOFTWARE_TYPE;
   }
 }
 
