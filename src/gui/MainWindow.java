@@ -1,12 +1,9 @@
 package gui;
 
 import java.io.File;
+import java.util.prefs.Preferences;
 
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.custom.CaretEvent;
-import org.eclipse.swt.custom.CaretListener;
-import org.eclipse.swt.custom.PaintObjectEvent;
-import org.eclipse.swt.custom.PaintObjectListener;
 import org.eclipse.swt.custom.StyleRange;
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.ControlAdapter;
@@ -17,14 +14,11 @@ import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
 import org.eclipse.swt.events.VerifyEvent;
 import org.eclipse.swt.events.VerifyListener;
-import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.graphics.Rectangle;
-import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.Control;
-import org.eclipse.swt.widgets.CoolBar;
 import org.eclipse.swt.widgets.DirectoryDialog;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
@@ -39,6 +33,18 @@ import org.eclipse.wb.swt.SWTResourceManager;
 import moveImagesToFrame.MoveImagesToFrame;
 
 public class MainWindow {
+
+  // Preference keys for this package
+  private static final String FRAME_DIR = "frame_dir";
+  private static final String SOURCE_DIR = "source_dir";
+  private static final String DATABASE_DIR = "database_dir";
+  private static final String LOG_FILE = "log_file";
+  private static final String PERCENT_TO_CHANGE_ON_FRAME = "percent_to_change_on_frame";
+  private static final String MB_TO_LEAVE_FREE= "mb_to_leave_free";
+  private static final String APPEND_TO_LOG_FILE= "append_to_log_file";
+  private static final String LIST_FILES_ONLY= "list_files_only";
+  private static final String QUIET_MODE= "quiet_mode";
+  private static final String DEBUG_MODE= "debug_mode";
 
   protected Shell shlMoveImagesToFrameGui;
   Menu menu;
@@ -76,6 +82,7 @@ public class MainWindow {
    * Open the window.
    */
   public void open () {
+    readConfiguration ();
     Display display = Display.getDefault ();
     createContents ();
     shlMoveImagesToFrameGui.open ();
@@ -86,6 +93,7 @@ public class MainWindow {
         display.sleep ();
       }
     }
+    saveConfiguration ();
   }
 
   /**
@@ -174,6 +182,7 @@ public class MainWindow {
     mntmExit.addSelectionListener(new SelectionAdapter() {
       @Override
       public void widgetSelected(SelectionEvent event) {
+        saveConfiguration ();
         shlMoveImagesToFrameGui.close ();
       }
     });
@@ -183,7 +192,7 @@ public class MainWindow {
     mntmRun.addSelectionListener(new SelectionAdapter() {
       @Override
       public void widgetSelected(SelectionEvent event) {
-        displayText (String.format ("Simulate running MoveImagesToFrame"), true);
+        runMoveImagesToFrame ();
       }
     });
   }
@@ -387,11 +396,17 @@ public class MainWindow {
     dirOpened = new File (dirName);
     
     if (!dirOpened.exists ()) {
-      // TODO error message needed
+      MessageBox errorDialog = new MessageBox (shlMoveImagesToFrameGui, SWT.ICON_ERROR | SWT.OK);
+      errorDialog.setText ("Error opening Directory");
+      errorDialog.setMessage ("Error, the specified directory does not exist.");
+      errorDialog.open ();
       dirOpened = null;
     }
     else if (!dirOpened.isDirectory ()) {
-      // TODO error message needed
+      MessageBox errorDialog = new MessageBox (shlMoveImagesToFrameGui, SWT.ICON_ERROR | SWT.OK);
+      errorDialog.setText ("Error opening Directory");
+      errorDialog.setMessage ("Error, the specified directory is actually a file.");
+      errorDialog.open ();
       dirOpened = null;
     }
     return dirOpened;
@@ -500,5 +515,59 @@ public class MainWindow {
         }
       }
     }); 
+  }
+  
+  private void readConfiguration () 
+  {
+    Preferences prefs = Preferences.userNodeForPackage (MainWindow.class);
+    
+    this.frameDir = null;
+    this.sourceDir = null;
+    this.databaseDir = null;
+    this.logFile = null;
+    
+    String frameDir = prefs.get (FRAME_DIR, null);
+    if (frameDir != null && !frameDir.equals ("")) {
+      this.frameDir = new File (frameDir);
+    }
+    String sourceDir = prefs.get (SOURCE_DIR, null);
+    if (sourceDir != null && !sourceDir.equals ("")) {
+      this.sourceDir = new File (sourceDir);
+    }
+    String databaseDir = prefs.get (DATABASE_DIR, null);
+    if (databaseDir != null && !databaseDir.equals ("")) {
+      this.databaseDir = new File (databaseDir);
+    }
+    String logFile = prefs.get (LOG_FILE, null);
+    if (logFile != null && !logFile.equals ("")) {
+      this.logFile = new File (logFile);
+    }
+    optionsResult.appendToLogFile = prefs.getBoolean (APPEND_TO_LOG_FILE, true);
+    optionsResult.debugMode = prefs.getBoolean (DEBUG_MODE, false);
+    optionsResult.listFilesOnly = prefs.getBoolean (LIST_FILES_ONLY, false);
+    optionsResult.mbToLeaveFree = prefs.getInt (MB_TO_LEAVE_FREE, 100);
+    optionsResult.percentToChangeOnFrame = prefs.getInt (PERCENT_TO_CHANGE_ON_FRAME, 10);
+    optionsResult.quietMode = prefs.getBoolean (QUIET_MODE, false);
+  }
+  
+  private void saveConfiguration ()
+  {
+    Preferences prefs = Preferences.userNodeForPackage(MainWindow.class);
+
+    prefs.put (FRAME_DIR, (this.frameDir != null? this.frameDir.toPath ().toString (): ""));
+    prefs.put (SOURCE_DIR, (this.sourceDir != null? this.sourceDir.toPath ().toString (): ""));
+    prefs.put (DATABASE_DIR, (this.databaseDir != null? this.databaseDir.toPath ().toString (): ""));
+    prefs.put (LOG_FILE, (this.logFile != null? this.logFile.toPath ().toString (): ""));
+    prefs.putBoolean (APPEND_TO_LOG_FILE, optionsResult.appendToLogFile);
+    prefs.putBoolean (DEBUG_MODE, optionsResult.debugMode);
+    prefs.putBoolean (LIST_FILES_ONLY, optionsResult.listFilesOnly);
+    prefs.putInt (MB_TO_LEAVE_FREE, optionsResult.mbToLeaveFree);
+    prefs.putInt (PERCENT_TO_CHANGE_ON_FRAME, optionsResult.percentToChangeOnFrame);
+    prefs.putBoolean (QUIET_MODE, optionsResult.quietMode);
+  }
+
+  private void runMoveImagesToFrame () {
+    saveConfiguration ();
+    displayText (String.format ("Simulate running MoveImagesToFrame"), true);
   }
 }
