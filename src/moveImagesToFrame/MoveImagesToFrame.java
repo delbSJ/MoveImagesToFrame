@@ -35,7 +35,7 @@ public class MoveImagesToFrame
   private static final String SOFTWARE_TYPE = MOVE_IMAGE_TO_FRAME_NAME + " " + MOVE_IMAGE_TO_FRAME_VERSION;
   private static final String[] extensionsToProcess = { ".jpg", ".jpeg", ".jpe" };
   private static final GregorianCalendar Year2000 = new GregorianCalendar (2000, Calendar.JANUARY , 1, 0, 0, 0);
-  private static final long BINARY_MB = 1024L * 1024L;
+  public static final long BINARY_MB = 1024L * 1024L;
   
   PrintStream outPS;
   File frameDir;
@@ -346,7 +346,7 @@ public class MoveImagesToFrame
     this.debugMode = debugMode;
   }
 
-  private void rotateFiles (boolean listFilesOnly)
+  void rotateFiles (boolean listFilesOnly)
   {
     TreeMap<String, PictureFrameFileInfo> filesInFrameDir = new TreeMap<String, PictureFrameFileInfo> ();
     TreeMap<String, PictureFrameFileInfo> uniqueFilesInFrameDir = new TreeMap<String, PictureFrameFileInfo> ();
