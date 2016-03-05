@@ -26,14 +26,16 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
+import gui.MainWindow;
+
 public class MoveImagesToFrame
 {
-  private static final String MOVE_IMAGE_TO_FRAME_VERSION = "v0.11";
+  private static final String MOVE_IMAGE_TO_FRAME_VERSION = "v0.11.0";
   private static final String MOVE_IMAGE_TO_FRAME_NAME = "MoveImagesToFrame";
   private static final String SOFTWARE_TYPE = MOVE_IMAGE_TO_FRAME_NAME + " " + MOVE_IMAGE_TO_FRAME_VERSION;
   private static final String[] extensionsToProcess = { ".jpg", ".jpeg", ".jpe" };
   private static final GregorianCalendar Year2000 = new GregorianCalendar (2000, Calendar.JANUARY , 1, 0, 0, 0);
-  private static final long BINARY_MB = 1024L * 1024L;
+  public static final long BINARY_MB = 1024L * 1024L;
   
   PrintStream outPS;
   File frameDir;
@@ -43,6 +45,7 @@ public class MoveImagesToFrame
   long numberBytestoLeaveFree;
   boolean verboseMode;
   boolean debugMode;
+  Thread processThread;
   /**
    * @param args
    */
@@ -125,7 +128,15 @@ public class MoveImagesToFrame
     else {
       // use Apache Commons CLI to parse keyword command line parameters
       if (args.length == 0) {
-        printUsage(outPS, "5 arguments are required, only " + args.length + " were specified");
+        // use the GUI
+        try {
+          MainWindow window = new MainWindow ();
+          window.open (window);
+        } catch (Exception e) {
+          System.out.println (e.toString ());
+          e.printStackTrace ();
+        }
+        System.exit (0); // done
       }
       
       String cmdArg = null;
@@ -334,9 +345,10 @@ public class MoveImagesToFrame
     this.numberBytestoLeaveFree = numberBytestoLeaveFree;
     this.verboseMode = verboseMode;
     this.debugMode = debugMode;
+    this.processThread = Thread.currentThread ();
   }
 
-  private void rotateFiles (boolean listFilesOnly)
+  void rotateFiles (boolean listFilesOnly)
   {
     TreeMap<String, PictureFrameFileInfo> filesInFrameDir = new TreeMap<String, PictureFrameFileInfo> ();
     TreeMap<String, PictureFrameFileInfo> uniqueFilesInFrameDir = new TreeMap<String, PictureFrameFileInfo> ();
@@ -380,29 +392,53 @@ public class MoveImagesToFrame
       // the Database does not exist, get a list of all files in the source directory
       outputIfVerbose ("Picture Frame File Info Database did not exist, scanning Source Dir%n");
       filesInSourceDir = scanDirectory (sourceDir, true);
+      if (processThread.isInterrupted ()) {
+        return;
+      }
       sourceDirModified = false; // ignore sourceDirModified since we just read all of sourceDir
     }
 
     if (sourceDirModified) {
       // the sourceDir was modified, read the sourceDir and merge those records to database records
       modifiedFilesInDir = scanDirectory (sourceDir, true);
+      if (processThread.isInterrupted ()) {
+        return;
+      }
       mergePictureFrameFileInfo (modifiedFilesInDir, filesInSourceDir, uniqueFilesInFrameDir, true);
+      if (processThread.isInterrupted ()) {
+        return;
+      }
     }
     if (frameDirModified) {
       // the frameDir was modified, read the frameDir and merge those records to database records
       modifiedFilesInDir = null;
       modifiedFilesInDir = scanDirectory (frameDir, false);
+      if (processThread.isInterrupted ()) {
+        return;
+      }
       mergePictureFrameFileInfo (modifiedFilesInDir, filesInSourceDir, uniqueFilesInFrameDir, false);
+      if (processThread.isInterrupted ()) {
+        return;
+      }
     }
     // we found the Database file (or created it), now extract the frame's file info
     extractFrameFileInfo (filesInSourceDir, filesInFrameDir, uniqueFilesInFrameDir);
+    if (processThread.isInterrupted ()) {
+      return;
+    }
 
     if (filesInFrameDir.isEmpty ()) {
       // the File Info on the Source indicates there are no known files in the Frame, extract the file info from frame
       outputIfVerbose ("File Info from the Frame doesn't exist, scanning Frame Dir%n");
       // get a list of all files in the frame directory
       filesInFrameDir = scanDirectory (frameDir, false);
+      if (processThread.isInterrupted ()) {
+        return;
+      }
       mergePictureFrameFileInfo (filesInFrameDir, filesInSourceDir, uniqueFilesInFrameDir, false);
+      if (processThread.isInterrupted ()) {
+        return;
+      }
     }
     
     numUniqueFrameDirFiles = uniqueFilesInFrameDir.size ();
@@ -412,6 +448,9 @@ public class MoveImagesToFrame
     + "files: %d%n", numSourceDirFiles, numFrameDirFiles, numUniqueFrameDirFiles);
     
     warnOfUnknownFrameFiles (uniqueFilesInFrameDir);
+    if (processThread.isInterrupted ()) {
+      return;
+    }
 
     if (sourceDirModified || frameDirModified) {
       // only update database if there have been modification, Issue #1
@@ -426,11 +465,17 @@ public class MoveImagesToFrame
         // determine which files should be deleted from frame and then new files copied to frame
         modified = replaceFrameFilesWithSourceFiles (filesInFrameDir, filesInSourceDir, percentageToReplace,
           numberBytestoLeaveFree, numSourceDirFiles, numFrameDirFiles, numUniqueFrameDirFiles, sourceDir, frameDir);
+        if (processThread.isInterrupted ()) {
+          return;
+        }
       }
       else {
         // there are no known files in frameDir, move as many sourceDir files to the frame as will 'fit'
         modified = replaceFrameFilesWithSourceFiles (filesInFrameDir, filesInSourceDir, 100.0f, numberBytestoLeaveFree,
           numSourceDirFiles, numFrameDirFiles, numUniqueFrameDirFiles, sourceDir, frameDir);
+        if (processThread.isInterrupted ()) {
+          return;
+        }
       }
       if (modified) {
         // finished moving files, update database files
@@ -462,6 +507,9 @@ public class MoveImagesToFrame
     int numFilesListed = 0;
     outPS.printf ("------------------- List of files %son Frame%n", dirType);
     for (PictureFrameFileInfo aFile : filesInDir.values ()) {
+      if (processThread.isInterrupted ()) {
+        return;
+      }
       if ((listFrame && aFile.isOnFrame ()) || (!listFrame && !aFile.isOnFrame ())) {
         outPS.println (aFile.toString ());
         ++numFilesListed;
@@ -487,6 +535,9 @@ public class MoveImagesToFrame
       outputIfVerbose ("Warning: the following %d file(s) that are in the Picture Frame are unknown and will not"
         + " be deleted to make room for new files%n", uniqueFilesInFrameDir.size ());
       for (PictureFrameFileInfo aFile : frameFileInfo) {
+        if (processThread.isInterrupted ()) {
+          return;
+        }
         outputIfVerbose (aFile.getFilenameOnFrame ());
         outputIfVerbose ("%n");
       }
@@ -502,12 +553,12 @@ public class MoveImagesToFrame
     }
   }
   
-  private void outputIfDebug (String debugFormatString, Object...args) {
-    if (debugMode) {
-      // debug mode is true, output the debug Format string
-      outPS.printf (debugFormatString, args);
-    }
-  }
+  // private void outputIfDebug (String debugFormatString, Object...args) {
+  // if (debugMode) {
+  // // debug mode is true, output the debug Format string
+  // outPS.printf (debugFormatString, args);
+  // }
+  // }
 
   private void mergePictureFrameFileInfo (TreeMap<String, PictureFrameFileInfo> fromMap,
     TreeMap<String, PictureFrameFileInfo> toMap, TreeMap<String, PictureFrameFileInfo> uniqueFilesInFrameDir,
@@ -546,6 +597,9 @@ public class MoveImagesToFrame
     outputIfVerbose ("Starting merge of picture frame file info%n");
     tempMap = getDataAboutFromMapWithinToMap (toMap, fromMapIsSrc);
     for (PictureFrameFileInfo fromMapRecord : fromMap.values ()) {
+      if (processThread.isInterrupted ()) {
+        return;
+      }
       ++fromMapRead;
       picturesProcessed = incrPicturesProcessed (picturesProcessed);
       if ((toMapRecord = toMap.get (fromMapRecord.getFileNameKey ())) != null) {
@@ -659,9 +713,6 @@ public class MoveImagesToFrame
         }
       }
     }
-
-    // outPS.printf ("There are %d source files, %d frame files and %d unique-on-frame files%n", sourceFiles,
-    // frameFiles, uniqueFrameFiles);
   }
 
   private boolean replaceFrameFilesWithSourceFiles (TreeMap<String, PictureFrameFileInfo> filesInFrameDir,
@@ -679,6 +730,9 @@ public class MoveImagesToFrame
     
     for (PictureFrameFileInfo swapCandidate : filesInSourceDir.values ()) {
       // look for files that are only in the sourceDir and files on frame but not unique
+      if (processThread.isInterrupted ()) {
+        return false;
+      }
       if (!swapCandidate.isOnFrame ()) {
         // this file is only in the sourceDir, add it to the list of files that can be swapped
         filesThatCanBeSwapped.add (swapCandidate);
@@ -787,7 +841,7 @@ public class MoveImagesToFrame
     directoriesToProcess.add (directoryToScanForFiles);
     
     processDirStructure (pictureFrameFileInfoMap, directoriesToProcess, sourceScan);
-    
+
     outputIfVerbose ("Finished Scan%n");
     return pictureFrameFileInfoMap;
   }
@@ -805,11 +859,14 @@ public class MoveImagesToFrame
     
     outputIfVerbose ("Starting scan of the %s directory%n", (sourceScan ? "Source" : "Frame"));
     // recursively process directories looking for jpg files
-    while (!directoriesToProcess.isEmpty ()) {
+    while (!processThread.isInterrupted () && !directoriesToProcess.isEmpty ()) {
       // get (and remove) 1st in Sorted Set (TreeSet)
       File dirToProcess = directoriesToProcess.pollFirst ();
       File[] filesInDir = dirToProcess.listFiles ();
       for (File fileOrDir : filesInDir) {
+        if (processThread.isInterrupted ()) {
+          return;
+        }
         picturesProcessed = incrPicturesProcessed (picturesProcessed);
         if (fileOrDir.isFile ()) {
           // this is a file, is it a jpg file?
@@ -881,6 +938,11 @@ public class MoveImagesToFrame
       + "Source Dir");
     outPS.printf ("%nKeyword Command Line Parameters%n");
     printHelpAndExit (outPS);
+  }
+  
+  public static String getVersion ()
+  {
+    return SOFTWARE_TYPE;
   }
 }
 
