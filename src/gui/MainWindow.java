@@ -512,8 +512,8 @@ public class MainWindow {
         else {
           optionsResult.appendToLogFile = false;
         } 
-        questionDialog.setText ("Append to Log File");
-        questionDialog.setMessage ("Do you want to write / append to the Log File after Run?");
+        questionDialog.setText ("Write / Append after Run");
+        questionDialog.setMessage ("Do you want to automatically write / append to the Log File after Run?");
          result = questionDialog.open ();
         if (result == SWT.YES) {
           optionsResult.autoWriteLogFile = true;
