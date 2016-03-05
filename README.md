@@ -10,4 +10,5 @@ Release Notes
 v 0.10.0	Original release
 v 0.11.0	Add new functionality
 		Keyword Command Line Parameters
+		Added GUI
 		
