@@ -1,9 +1,11 @@
 package gui;
 
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.PrintStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.prefs.Preferences;
 
 import org.eclipse.swt.SWT;
@@ -15,8 +17,11 @@ import org.eclipse.swt.events.ModifyEvent;
 import org.eclipse.swt.events.ModifyListener;
 import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.events.ShellEvent;
+import org.eclipse.swt.events.ShellListener;
 import org.eclipse.swt.events.VerifyEvent;
 import org.eclipse.swt.events.VerifyListener;
+import org.eclipse.swt.graphics.Cursor;
 import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.graphics.Point;
@@ -37,7 +42,11 @@ import moveImagesToFrame.MoveImagesToFrame;
 import moveImagesToFrame.MoveImagesToFrameThread;
 
 public class MainWindow {
-  public static final int DISPLAY_TEXT_MILLIS = 1000;
+  public static final long DISPLAY_TEXT_MILLIS = 500L;
+  public static final String TEXT_LOG_FILE = " to Log File";
+  public static final String TEXT_APPEND = "Append";
+  public static final String TEXT_WRITE = "Write";
+  public static final int TEXT_AMOUNT_FOR_ONE_WRITE = 1024;
 
   // Preference keys for this package
   private static final String FRAME_DIR = "frame_dir";
@@ -46,20 +55,31 @@ public class MainWindow {
   private static final String LOG_FILE = "log_file";
   private static final String PERCENT_TO_CHANGE_ON_FRAME = "percent_to_change_on_frame";
   private static final String MB_TO_LEAVE_FREE = "mb_to_leave_free";
+  private static final String AUTO_WRITE_LOG_FILE_AFTER_RUN = "auto_write_log_file_after_run";
   private static final String APPEND_TO_LOG_FILE = "append_to_log_file";
   private static final String LIST_FILES_ONLY = "list_files_only";
   private static final String QUIET_MODE = "quiet_mode";
   private static final String DEBUG_MODE = "debug_mode";
 
+  protected QueueOutputStream qOS;
+  protected QueueInputStream qIS;
+  private Display display;
+  private Cursor oldCursor = null;
   protected Shell shlMoveImagesToFrameGui;
+  private MainWindow thisMainWindow;
   private Menu menu;
   private StyledText styledText;
-  // private String lineDelimiter;
+  private MenuItem mntmWriteLogFile;
   private StyleRange[] selectedRanges;
   private int newCharCount, start;
   private Font textFont;
-  private boolean displayTextAppend = false;
-  private Runnable timer;
+  private MoveImagesToFrameThread moveImagesToFrameReadThread = null;
+  public MoveImagesToFrameThread moveImagesToFrameThread = null;
+  private boolean afterRun = false;
+  private StringBuilder displaySB = null;
+  private int lastCharRead = -1;
+  private boolean readerEOF = false;
+  private String lineDelimiter = null;
   private DirectoryDialog frameDirDialog = null;
   private DirectoryDialog sourceDirDialog = null;
   private DirectoryDialog databaseDirDialog = null;
@@ -78,7 +98,7 @@ public class MainWindow {
   public static void main (String[] args) {
     try {
       MainWindow window = new MainWindow ();
-      window.open ();
+      window.open (window);
     } catch (Exception e) {
       System.out.println (e.toString ());
       e.printStackTrace ();
@@ -88,16 +108,21 @@ public class MainWindow {
   /**
    * Open the window.
    */
-  public void open () {
+  public void open (MainWindow window) {
+    thisMainWindow = window;
     readConfiguration ();
     Display display = Display.getDefault ();
+    this.display = display;
     createContents ();
     shlMoveImagesToFrameGui.open ();
     shlMoveImagesToFrameGui.layout ();
     displaySettings ();
     while (!shlMoveImagesToFrameGui.isDisposed ()) {
       if (!display.readAndDispatch ()) {
-        display.sleep ();
+        if (!processDataFromMoveImages ()) {
+          // nothing to display, go to sleep
+          display.sleep ();
+        }
       }
     }
     saveConfiguration ();
@@ -110,6 +135,22 @@ public class MainWindow {
     shlMoveImagesToFrameGui = new Shell ();
     shlMoveImagesToFrameGui.setMinimumSize (new Point (740, 600));
     shlMoveImagesToFrameGui.setSize (800, 600);
+    shlMoveImagesToFrameGui.addShellListener (new ShellListener() {
+      @Override
+      public void shellIconified (ShellEvent arg0) {}
+      @Override
+      public void shellDeiconified (ShellEvent arg0) {}
+      @Override
+      public void shellDeactivated (ShellEvent arg0) {}
+      @Override
+      public void shellClosed (ShellEvent arg0) {
+        saveConfiguration ();
+        cleanUpForExit ();
+      }
+      @Override
+      public void shellActivated (ShellEvent arg0) {}
+    });
+    
     String header = null;
     try {
       header = MoveImagesToFrame.getVersion () + " GUI";
@@ -120,7 +161,7 @@ public class MainWindow {
     shlMoveImagesToFrameGui.setLayout (null);
 
     styledText = new StyledText (shlMoveImagesToFrameGui, SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL);
-    styledText.getLineDelimiter ();
+    this.lineDelimiter = styledText.getLineDelimiter ();
     installStyledTextListeners ();
 
     menu = new Menu (shlMoveImagesToFrameGui, SWT.BAR);
@@ -205,27 +246,79 @@ public class MainWindow {
       @Override
       public void widgetSelected (SelectionEvent event) {
         runMoveImagesToFrame ();
-        writeToLogIfSet ();
       }
     });
     
-    timer = new Runnable () {
+    MenuItem mntmWriteLogFile = new MenuItem(menu, SWT.NONE);
+    this.mntmWriteLogFile = mntmWriteLogFile;
+    mntmWriteLogFile.addSelectionListener (new SelectionAdapter () {
       @Override
-      public void run () {
-        if (shlMoveImagesToFrameGui.isDisposed ())
-          return;
-        if (displayTextAppend) {
-          // there has been a displayText append since the last time we ran, force a scroll to bottom of text
-          displayTextAppend = false;
-          int numChars = styledText.getCharCount ();
-          styledText.setSelection (numChars);
-          styledText.setHorizontalIndex (0);
-        }
-        shlMoveImagesToFrameGui.getDisplay ().timerExec (DISPLAY_TEXT_MILLIS, this);
+      public void widgetSelected (SelectionEvent event) {
+        writeToLogIfSet ();
       }
-    };
-    // start the timer running
-    shlMoveImagesToFrameGui.getDisplay ().timerExec (DISPLAY_TEXT_MILLIS, timer);
+    });
+    enableDisableLogFileMenuItem ();
+  }
+    
+  private boolean cleanUpForExit ()
+  {
+    boolean cleanupSucceeded = true;
+    
+    if (moveImagesToFrameThread != null || moveImagesToFrameReadThread != null) {
+      displayText ("It may take a minute or so to close the Move Images to Frame process", false);
+    }
+    
+    if (moveImagesToFrameThread != null) {
+      // we are moving images to the frame, interrupt it
+      moveImagesToFrameThread.interrupt ();
+      // wait for it to exit
+      try {
+        moveImagesToFrameThread.join (5000L);
+      } catch (InterruptedException e) {
+        // re-throw InterruptedException
+        Thread.currentThread ().interrupt ();
+      }
+      if (moveImagesToFrameThread.isAlive ()) {
+        displayErrorDialog ("Move Images To Frame Process is still executing after Exit signal", "Termination Failure");
+        cleanupSucceeded = false;
+      }
+      else {
+        // thread exited successfully
+        moveImagesToFrameThread = null;
+      }
+    }
+    if (moveImagesToFrameReadThread != null) {
+      // we are displaying data from moving images to the frame, interrupt it
+      moveImagesToFrameReadThread.interrupt ();
+      // wait for it to exit
+      try {
+        moveImagesToFrameReadThread.join (1000L);
+      } catch (InterruptedException e) {
+        // re-throw InterruptedException
+        Thread.currentThread ().interrupt ();
+      }
+      if (moveImagesToFrameReadThread.isAlive ()) {
+        displayErrorDialog ("Move Images To Frame (Display Data) Process is still executing after Exit signal",
+            "Termination Failure");
+        cleanupSucceeded = false;
+      }
+      else {
+        // thread exited successfully
+        moveImagesToFrameReadThread = null;
+      }
+    }
+    return cleanupSucceeded;
+  }
+
+  private void enableDisableLogFileMenuItem () {
+    mntmWriteLogFile
+        .setText ((optionsResult != null && optionsResult.appendToLogFile ? TEXT_APPEND : TEXT_WRITE) + TEXT_LOG_FILE);
+    if (logFile == null || optionsResult.autoWriteLogFile || (!optionsResult.autoWriteLogFile && !afterRun)) {
+      mntmWriteLogFile.setEnabled(false);
+    }
+    else {
+      mntmWriteLogFile.setEnabled(true);
+    }
   }
 
   void installStyledTextListeners () {
@@ -241,12 +334,6 @@ public class MainWindow {
         handleModify (event);
       }
     });
-    // styledText.addPaintObjectListener(new PaintObjectListener() {
-    // @Override
-    // public void paintObject(PaintObjectEvent event) {
-    // handlePaintObject(event);
-    // }
-    // });
     styledText.addListener (SWT.Dispose, new Listener () {
       @Override
       public void handleEvent (Event event) {
@@ -272,13 +359,7 @@ public class MainWindow {
 
   void handleResize (ControlEvent event) {
     Rectangle rect = shlMoveImagesToFrameGui.getClientArea ();
-    // Point cSize = menu.computeSize(rect.width, SWT.DEFAULT);
-    // Point sSize = statusBar.computeSize(SWT.DEFAULT, SWT.DEFAULT);
-    // int statusMargin = 2;
-    // coolBar.setBounds(rect.x, rect.y, cSize.x, cSize.y);
     styledText.setBounds (rect.x, rect.y, rect.width, rect.height);
-    // statusBar.setBounds(rect.x + statusMargin, rect.y + rect.height - sSize.y - statusMargin, rect.width - (2 *
-    // statusMargin), sSize.y);
   }
 
   void handleVerifyText (VerifyEvent event) {
@@ -298,49 +379,8 @@ public class MainWindow {
       }
       else {
         style.fontStyle = SWT.NONE;
-        // if (boldControl.getSelection()) style.fontStyle |= SWT.BOLD;
-        // if (italicControl.getSelection()) style.fontStyle |= SWT.ITALIC;
       }
-      // if ((styleState & FOREGROUND) != 0) {
-      // style.foreground = textForeground;
-      // }
-      // if ((styleState & BACKGROUND) != 0) {
-      // style.background = textBackground;
-      // }
-      // int underlineStyle = styleState & UNDERLINE;
-      // if (underlineStyle != 0) {
-      // style.underline = true;
-      // style.underlineColor = underlineColor;
-      // switch (underlineStyle) {
-      // case UNDERLINE_SINGLE: style.underlineStyle = SWT.UNDERLINE_SINGLE; break;
-      // case UNDERLINE_DOUBLE: style.underlineStyle = SWT.UNDERLINE_DOUBLE; break;
-      // case UNDERLINE_SQUIGGLE: style.underlineStyle = SWT.UNDERLINE_SQUIGGLE; break;
-      // case UNDERLINE_ERROR: style.underlineStyle = SWT.UNDERLINE_ERROR; break;
-      // case UNDERLINE_LINK: {
-      // style.underlineColor = null;
-      // if (link != null && link.length() > 0) {
-      // style.underlineStyle = SWT.UNDERLINE_LINK;
-      // style.data = link;
-      // } else {
-      // style.underline = false;
-      // }
-      // break;
-      // }
-      // }
-      // }
-      // if ((styleState & STRIKEOUT) != 0) {
-      // style.strikeout = true;
-      // style.strikeoutColor = strikeoutColor;
-      // }
-      // int borderStyle = styleState & BORDER;
-      // if (borderStyle != 0) {
-      // style.borderColor = borderColor;
-      // switch (borderStyle) {
-      // case BORDER_DASH: style.borderStyle = SWT.BORDER_DASH; break;
-      // case BORDER_DOT: style.borderStyle = SWT.BORDER_DOT; break;
-      // case BORDER_SOLID: style.borderStyle = SWT.BORDER_SOLID; break;
-      // }
-      // }
+
       int[] ranges = {
           start, newCharCount
       };
@@ -376,14 +416,6 @@ public class MainWindow {
       }
       if (disposeFont && style.font != textFont && style.font != null)
         style.font.dispose ();
-      // if (disposeFg && style.foreground != textForeground && style.foreground != null) style.foreground.dispose();
-      // if (disposeBg && style.background != textBackground && style.background != null) style.background.dispose();
-      // if (disposeStrike && style.strikeoutColor != strikeoutColor && style.strikeoutColor != null)
-      // style.strikeoutColor.dispose();
-      // if (disposeUnder && style.underlineColor != underlineColor && style.underlineColor != null)
-      // style.underlineColor.dispose();
-      // if (disposeBorder && style.borderColor != borderColor && style.borderColor != null)
-      // style.borderColor.dispose();
 
       Object data = style.data;
       if (data != null) {
@@ -479,7 +511,16 @@ public class MainWindow {
         }
         else {
           optionsResult.appendToLogFile = false;
+        } 
+        questionDialog.setText ("Append to Log File");
+        questionDialog.setMessage ("Do you want to write / append to the Log File after Run?");
+         result = questionDialog.open ();
+        if (result == SWT.YES) {
+          optionsResult.autoWriteLogFile = true;
         }
+        else {
+          optionsResult.autoWriteLogFile = false;
+        } 
       }
     }
     else {
@@ -503,6 +544,7 @@ public class MainWindow {
   }
 
   private void displaySettings () {
+    enableDisableLogFileMenuItem ();
     StringBuilder ds = new StringBuilder (1000);
     ds.append ("Frame Dir: ");
     if (frameDir != null) {
@@ -532,6 +574,8 @@ public class MainWindow {
     else {
       ds.append ("<not set> <Optional>");
     }
+    ds.append (", Auto-write to Log File after Run: ");
+    ds.append (optionsResult.autoWriteLogFile ? "true" : "false");
     ds.append (", Append to Log File: ");
     ds.append (optionsResult.appendToLogFile ? "true" : "false");
     ds.append ("\nOptions:\n");
@@ -550,22 +594,25 @@ public class MainWindow {
   }
 
   protected void displayText (final String textString, final boolean appendText) {
-    // Guard against superfluous mouse move events -- defer action until later
-    Display display = styledText.getDisplay ();
-    display.asyncExec (new Runnable () {
-      @Override
-      public void run () {
-        if (appendText) {
-          styledText.append (textString);
-          displayTextAppend = true; // the free running timerTask will scroll to the bottom
-        }
-        else {
-          styledText.setText (textString);
-        }
+    if (appendText) {
+      if (textString == null) {
+        // this is a forced scroll request
+        // doForcedScroll ();
       }
-    });
+      else {
+        // System.out.println ("displayText");
+        styledText.append (textString);
+        // chkForForcedScroll (textString);
+      }
+      // displayTextAppend = true;
+      if (!display.isDisposed ())
+        display.wake ();
+    }
+    else {
+      styledText.setText (textString);
+    }
   }
-
+  
   private void readConfiguration () {
     Preferences prefs = Preferences.userNodeForPackage (MainWindow.class);
 
@@ -590,6 +637,7 @@ public class MainWindow {
     if (logFile != null && !logFile.equals ("")) {
       this.logFile = new File (logFile);
     }
+    optionsResult.autoWriteLogFile = prefs.getBoolean (AUTO_WRITE_LOG_FILE_AFTER_RUN, false);
     optionsResult.appendToLogFile = prefs.getBoolean (APPEND_TO_LOG_FILE, true);
     optionsResult.debugMode = prefs.getBoolean (DEBUG_MODE, false);
     optionsResult.listFilesOnly = prefs.getBoolean (LIST_FILES_ONLY, false);
@@ -605,6 +653,7 @@ public class MainWindow {
     prefs.put (SOURCE_DIR, (this.sourceDir != null ? this.sourceDir.toPath ().toString () : ""));
     prefs.put (DATABASE_DIR, (this.databaseDir != null ? this.databaseDir.toPath ().toString () : ""));
     prefs.put (LOG_FILE, (this.logFile != null ? this.logFile.toPath ().toString () : ""));
+    prefs.putBoolean (AUTO_WRITE_LOG_FILE_AFTER_RUN, optionsResult.autoWriteLogFile);
     prefs.putBoolean (APPEND_TO_LOG_FILE, optionsResult.appendToLogFile);
     prefs.putBoolean (DEBUG_MODE, optionsResult.debugMode);
     prefs.putBoolean (LIST_FILES_ONLY, optionsResult.listFilesOnly);
@@ -614,7 +663,7 @@ public class MainWindow {
   }
 
   private void displayErrorDialog (String errorMsg, String dialogTitle) {
-    displayText (errorMsg, true);
+    displayText (errorMsg + "\n", true);
     MessageBox errorDialog = new MessageBox (shlMoveImagesToFrameGui, SWT.ICON_ERROR | SWT.OK);
     errorDialog.setText (dialogTitle);
     errorDialog.setMessage (errorMsg);
@@ -622,51 +671,148 @@ public class MainWindow {
   }
 
   protected void writeToLogIfSet () {
-    // TODO Auto-generated method stub
-    
+    if (logFile != null && !optionsResult.autoWriteLogFile) {
+      // the log file is defined, was not written via auto-write, use optionsResult.appendToLogFile 
+      //   to append or overwrite
+      writeStyledTextToLogFile ();
+    }
+  }
+
+  private void writeStyledTextToLogFile () {
+    FileWriter fw;
+    try {
+      fw = new FileWriter (logFile, optionsResult.appendToLogFile);
+    } catch (IOException e) {
+      displayErrorDialog (String.format ("Log File not Found: %s", e.toString ()), "Log File not found");
+      return;
+    }
+    int textEndOffset = styledText.getCharCount ();
+    int textStart = 0;
+    int amtLeftToReadWrite;
+    int amtToReadWrite;
+    String textToWriteToLog;
+    displayText (String.format ("Writing %,d bytes to Log File%n", textEndOffset), true);
+    Date date = new Date (System.currentTimeMillis ());
+    SimpleDateFormat dateTime = new SimpleDateFormat ();
+    if (writeStringToFile (fw,
+        String.format ("========================================%s%n", dateTime.format (date)))) {
+      return; // error on write
+    }
+    do {
+      amtLeftToReadWrite = textEndOffset - textStart;
+      amtToReadWrite = TEXT_AMOUNT_FOR_ONE_WRITE < amtLeftToReadWrite ? TEXT_AMOUNT_FOR_ONE_WRITE : amtLeftToReadWrite;
+      textToWriteToLog = styledText.getTextRange (textStart, amtToReadWrite);
+      if (writeStringToFile (fw, textToWriteToLog)) {
+        return; // error on write
+      }
+      textStart += amtToReadWrite;
+    } while (textStart < textEndOffset);
+    if (writeStringToFile (fw, "========================================")) {
+      return; // error on write
+    }
+    try {
+      fw.close ();
+    } catch (IOException e) {
+    }
+    afterRun = false;
+    displaySettings ();
+    displayText ("Finished writing Log File\n", true);
+    return;
+  }
+
+  private boolean writeStringToFile (FileWriter fw, String textToWriteToLog) {
+    try {
+      fw.write (textToWriteToLog);
+    } catch (IOException e) {
+      displayErrorDialog (String.format ("Error writing to Log File: %s", e.toString ()),
+          "Error writing to Log File");
+      try {
+        fw.close ();
+      } catch (IOException e1) {}
+      return true;
+    }
+    return false;
   }
 
   private void runMoveImagesToFrame () {
     saveConfiguration ();
 
-    Throwable caughtException = null;
-    char[] charArray = new char[1024];
-    int charsRead;
+    // System.out.printf ("Run, This Thread: %s, Display: %s%n", Thread.currentThread ().toString (),
+    // Display.getCurrent ().toString ());
+
+    displaySB = new StringBuilder (1000);
     QueueOutputStream queueOS = new QueueOutputStream ();
-    QueueInputStream queueIS = null;
+    queueOS.setDisplay (display);
     PrintStream outPS = null;
+    outPS = new PrintStream (queueOS, true);
     try {
-      queueIS = new QueueInputStream (queueOS);
+      qIS = new QueueInputStream (queueOS, this);
     } catch (IOException e) {
       String errorMsg = String.format ("IOException opening QueueInputStream: %s", e.toString ());
       displayErrorDialog (errorMsg, "Error opening QueueInputStream");
       return;
     }
-    outPS = new PrintStream (queueOS);
-    InputStreamReader isReader = new InputStreamReader (queueIS);
 
     displayText (String.format ("running MoveImagesToFrame%n"), true);
+    oldCursor = styledText.getCursor ();
+    styledText.setCursor (display.getSystemCursor(SWT.CURSOR_WAIT));
+    
+    moveImagesToFrameReadThread = new MoveImagesToFrameThread ("mitfReadThread", Thread.currentThread (), outPS,
+        frameDir, sourceDir, databaseDir, ((float) optionsResult.percentToChangeOnFrame / 100.0f),
+        optionsResult.mbToLeaveFree * MoveImagesToFrame.BINARY_MB, !optionsResult.quietMode, optionsResult.debugMode,
+        optionsResult.listFilesOnly, true, thisMainWindow);
+    moveImagesToFrameReadThread.start ();
+  }
 
+  public void handleMoveToFrameDisplay (PrintStream outPS) {
     // create a thread to move the images to the frame
     MoveImagesToFrameThread moveImagesToFrameThread =
         new MoveImagesToFrameThread ("mitfThread", Thread.currentThread (), outPS, frameDir, sourceDir, databaseDir,
             ((float) optionsResult.percentToChangeOnFrame / 100.0f),
             optionsResult.mbToLeaveFree * MoveImagesToFrame.BINARY_MB, !optionsResult.quietMode,
-            optionsResult.debugMode, optionsResult.listFilesOnly);
+            optionsResult.debugMode, optionsResult.listFilesOnly, false, thisMainWindow);
     moveImagesToFrameThread.start ();
     
-    String moveImageToFrameStr = "";
+    // get the data from moveImagesToFrameThread
+    getDataFromMoveImages (); // reads until end of stream
+    
+    // now wait for the move images thread to end
     try {
-      while ((charsRead = isReader.read (charArray)) != -1) {
-        moveImageToFrameStr = new String (charArray, 0, charsRead);
-        displayText (moveImageToFrameStr, true);
+      moveImagesToFrameThread.join ();
+    } catch (InterruptedException e) {
+      // re-throw InterruptedException
+      Thread.currentThread ().interrupt ();
+    }
+  }
+
+  private void getDataFromMoveImages () {
+    Throwable caughtException;
+    String moveImageToFrameStr = "";
+    
+    try {
+      // DEBUG
+      // qOS.debugInOutIndicator ("R");
+      // end DEBUG
+      while ((moveImageToFrameStr = readLine ()) != null) {
+        // DEBUG
+        // lastLineFromMoveImageToFrame = moveImageToFrameStr;
+        // qOS.debugInOutIndicator ("L");
+        // end DEBUG
+        addToDisplaySB (moveImageToFrameStr, lineDelimiter);
       }
+      // all done, close the pipe
+      try {
+        qIS.close ();
+      } catch (IOException e) {}
+
+      // indicate that move images to frame is done
+      qIS = null;
     } catch (IOException e) {
       displayText (String.format ("----------------------------------%nLast data read was %d chars long%n%s%n"
           + "IOException on Queue: %s%n", moveImageToFrameStr.length (), moveImageToFrameStr, e.toString ()), true);
       // close the Queue
       try {
-        isReader.close ();
+        qIS.close ();
       } catch (IOException e2) {
         displayText (String.format ("IOException on closing Queue: %s%n", e2.toString ()), true);
       }
@@ -685,10 +831,138 @@ public class MainWindow {
         Thread.currentThread ().interrupt ();
       }
     }
-    // all done, close the pipe
-    try {
-      isReader.close ();
-    } catch (IOException e) {}
+  }
+  
+  private String readLine () throws IOException { 
+    StringBuilder sb = new StringBuilder (1000);
+    String readLineStr;
+    int intRead;
+
+    if (readerEOF)
+      return null;
+    
+    while ((intRead = qIS.read ()) != -1) {
+      if (intRead == '\r') {
+        // got a <CR> line termination character
+        lastCharRead = intRead;
+        break;
+      }
+      if (intRead == '\n') {
+        // got a <NL> line termination character
+        if (lastCharRead == '\r') {
+          // this is <CR><NL>, ignore the <NL>
+          continue;
+        }
+        // got a <NL> line termination character
+        lastCharRead = intRead;
+        break;
+      }
+      lastCharRead = intRead;
+      sb.append ((char) intRead);
+    }
+    
+    if (intRead == -1) {
+      // reader reached end of stream, any data in sb?
+      readerEOF = true;
+      if (sb.length () == 0) {
+        // nothing in sb, return null
+        return null;
+      }
+    }
+    
+    readLineStr = sb.toString ();
+    sb.setLength (0);
+    return readLineStr;
+  }
+
+  private void addToDisplaySB (String...displayData)
+  {
+    synchronized(displaySB) {
+      for (int i = 0; i < displayData.length; ++i) {
+        displaySB.append (displayData[i]);
+      }
+    }
+  }
+
+  private boolean processDataFromMoveImages () {
+    boolean dataProcessedToDisplay = false;
+    String displaySBStr = null;
+    
+    while (moveImagesToFrameReadThread != null && !dataProcessedToDisplay) {
+      // get data from thread while it is alive
+      synchronized (displaySB) {
+        if (displaySB.length () > 0) {
+          dataProcessedToDisplay = true;
+          displaySBStr = displaySB.toString ();
+          displaySB.setLength (0);
+        }
+      }
+      if (dataProcessedToDisplay) {
+        styledText.append (displaySBStr);
+        int numChars = styledText.getCharCount ();
+        styledText.setSelection (numChars);
+        styledText.setHorizontalIndex (0);
+      }
+      else {
+        // there was no data available, wait for read thread to exit but only for DISPLAY_TEXT_MILLIS milliseconds
+        try {
+          moveImagesToFrameReadThread.join (DISPLAY_TEXT_MILLIS);
+        } catch (InterruptedException e) {
+          // re-throw InterruptedException
+          Thread.currentThread ().interrupt ();
+        }
+        if (!moveImagesToFrameReadThread.isAlive ()) {
+          // the thread isn't alive so we have all of the data, get the last few lines
+          if (oldCursor != null) {
+            // restore the original cursor
+            styledText.setCursor (oldCursor);
+          }
+          synchronized (displaySB) {
+            if (displaySB.length () > 0) {
+              dataProcessedToDisplay = true;
+              displaySBStr = displaySB.toString ();
+              displaySB.setLength (0);
+            }
+          }
+          if (dataProcessedToDisplay) {
+            styledText.append (displaySBStr);
+            int numChars = styledText.getCharCount ();
+            styledText.setSelection (numChars);
+            styledText.setHorizontalIndex (0);
+          }
+
+          if (optionsResult.autoWriteLogFile && logFile != null) {
+            // auto-write the results to the log file
+            writeStyledTextToLogFile ();
+          }
+          else {
+            afterRun = true; // enable the write log button
+            enableDisableLogFileMenuItem ();
+          }
+          // indicate we have processed all the data to the display
+          moveImagesToFrameReadThread = null;
+          displaySB = null;
+        }
+        else {
+          // thread is still alive, did we get data while waiting?
+          synchronized (displaySB) {
+            if (displaySB.length () > 0) {
+              dataProcessedToDisplay = true;
+              displaySBStr = displaySB.toString ();
+              displaySB.setLength (0);
+            }
+          }
+          if (dataProcessedToDisplay) {
+            styledText.append (displaySBStr);
+            int numChars = styledText.getCharCount ();
+            styledText.setSelection (numChars);
+            styledText.setHorizontalIndex (0);
+          }
+          break; // need to return to dispatch loop
+        }
+      }
+    }
+    return dataProcessedToDisplay;
   }
 
   private void formatDisplayThrowable (Throwable caughtException) {

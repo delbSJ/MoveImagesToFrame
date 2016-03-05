@@ -32,6 +32,8 @@ public class OptionsDialog extends Dialog {
   Label lblMBtoLeaveFree;
   Spinner percentToChgSpinner;
   Label labelPercentToChg;
+  Button btnAutoWriteLogFile;
+  Label lblAutoWriteLogFile;
   Button btnAppendLogFile;
   Label lblAppendLogFile;
   Button btnListFilesOnly;
@@ -78,8 +80,8 @@ public class OptionsDialog extends Dialog {
    */
   private void createContents () {
     shlMoveimagestoframeOptions = new Shell (getParent (), getStyle ());
-    shlMoveimagestoframeOptions.setMinimumSize(new Point(251, 260));
-    shlMoveimagestoframeOptions.setSize (251, 260);
+    shlMoveimagestoframeOptions.setMinimumSize(new Point(286, 285));
+    shlMoveimagestoframeOptions.setSize (286, 285);
     shlMoveimagestoframeOptions.setLayout(new GridLayout(2, false));
     
     final Spinner percentToChgSpinner = new Spinner(shlMoveimagestoframeOptions, SWT.BORDER);
@@ -100,6 +102,37 @@ public class OptionsDialog extends Dialog {
     Label lblMBtoLeaveFree = new Label(shlMoveimagestoframeOptions, SWT.NONE);
     this.lblMBtoLeaveFree = lblMBtoLeaveFree;
     lblMBtoLeaveFree.setText("Megabytes to leave free");
+    
+    final Button btnAutoWriteLogFile = new Button(shlMoveimagestoframeOptions, SWT.CHECK);
+    this.btnAutoWriteLogFile = btnAutoWriteLogFile;
+    btnAutoWriteLogFile.setLayoutData(new GridData(SWT.RIGHT, SWT.CENTER, false, false, 1, 1));
+    btnAutoWriteLogFile.setAlignment(SWT.RIGHT);
+    btnAutoWriteLogFile.setSelection (optionsResult.autoWriteLogFile);
+    btnAutoWriteLogFile.addSelectionListener (new SelectionAdapter () {
+      @Override
+      public void widgetSelected (SelectionEvent event) {
+        optionsResult.autoWriteLogFile = btnAutoWriteLogFile.getSelection ();
+
+      }
+    });
+    final Label lblAutoWriteLogFile = new Label(shlMoveimagestoframeOptions, SWT.NONE);
+    this.lblAutoWriteLogFile = lblAutoWriteLogFile;
+    lblAutoWriteLogFile.setText("Auto-write to Log File after Run");
+    lblAutoWriteLogFile.addMouseListener (new MouseListener() {
+      @Override
+      public void mouseUp (MouseEvent arg0) {}
+      
+      @Override
+      public void mouseDown (MouseEvent arg0) {
+        //clicked on label, toggle the labels control
+        optionsResult.autoWriteLogFile = !btnAutoWriteLogFile.getSelection ();
+        lblAutoWriteLogFile.setFocus ();
+        btnAutoWriteLogFile.setSelection (optionsResult.autoWriteLogFile);
+      }
+      
+      @Override
+      public void mouseDoubleClick (MouseEvent arg0) {}
+    });
     
     final Button btnAppendLogFile = new Button(shlMoveimagestoframeOptions, SWT.CHECK);
     this.btnAppendLogFile = btnAppendLogFile;

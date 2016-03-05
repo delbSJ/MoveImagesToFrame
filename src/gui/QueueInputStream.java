@@ -6,7 +6,7 @@ import java.util.concurrent.BlockingQueue;
 
 public class QueueInputStream extends InputStream {
   
-  // private QueueOutputStream qOS;
+  // private QueueOutputStream qOS; // DEBUG
   private boolean closed;
   private BlockingQueue<byte[]> queue;
   private byte[] buffer;
@@ -17,11 +17,12 @@ public class QueueInputStream extends InputStream {
     initClass ();
   }
 
-  public QueueInputStream (QueueOutputStream qOS) throws IOException {
+  public QueueInputStream (QueueOutputStream qOS, MainWindow guiWindow) throws IOException {
     if (qOS == null || qOS.isClosed ())
       throwClosedException ();
+    // this.qOS = qOS; // DEBUG
+    guiWindow.qOS = qOS;
     initClass ();
-    // this.qOS = qOS;
     queue = qOS.getQueue ();
     endSignal = QueueOutputStream.END_SIGNAL;
   }
@@ -31,19 +32,9 @@ public class QueueInputStream extends InputStream {
     if (closed) {
       throwClosedException ();
     }
-    if (buffer == null || offsetInBuffer >= buffer.length) {
-      // we need a new buffer
-      try {
-        buffer = queue.take ();
-        offsetInBuffer = 0;
-        if (buffer == endSignal) {
-          return -1; // we have gotten the END_SIGNAL
-        }
-      } catch (InterruptedException e) {
-        closed = true;
-        // re-throw InterruptedException
-        Thread.currentThread ().interrupt ();
-      }
+    // get a new buffer if we needed it
+    if (!getBufferFromQueue ()) {
+      return -1; 
     }
     return (int) (buffer[offsetInBuffer++] & 0x00ff);
   }
@@ -65,8 +56,9 @@ public class QueueInputStream extends InputStream {
     int userOffset = offset;
     
     int bytesInBuffer;
-    int numBytesWanted;
+    int numBytesWanted = len;
     int bytesToMoveToByteBuffer;
+    
     do {
       // get a new buffer if we needed it
       if (!getBufferFromQueue ()) {
@@ -76,7 +68,6 @@ public class QueueInputStream extends InputStream {
       }
       // determine # of bytes in buffer
       bytesInBuffer = buffer.length - offsetInBuffer;
-      numBytesWanted = len - userOffset;
       bytesToMoveToByteBuffer = bytesInBuffer > numBytesWanted ? numBytesWanted : bytesInBuffer;
       System.arraycopy (buffer, offsetInBuffer, byteBuffer, userOffset, bytesToMoveToByteBuffer);
       offsetInBuffer += bytesToMoveToByteBuffer;
@@ -118,6 +109,7 @@ public class QueueInputStream extends InputStream {
       }
       try {
         buffer = queue.take ();
+        
         offsetInBuffer = 0;
         if (buffer == endSignal) {
           return false; // we have gotten the END_SIGNAL
@@ -126,6 +118,7 @@ public class QueueInputStream extends InputStream {
         closed = true;
         // re-throw InterruptedException
         Thread.currentThread ().interrupt ();
+        return false;
       }
     }
     return true;

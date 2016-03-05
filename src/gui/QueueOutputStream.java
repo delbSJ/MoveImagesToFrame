@@ -5,17 +5,26 @@ import java.io.OutputStream;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingDeque;
 
+import org.eclipse.swt.widgets.Display;
+
 public class QueueOutputStream extends OutputStream {
+  private static final int DEBUG_INDICATOR_LINE_SIZE = 120;
   private static final int DEFAULT_BUFFER_SIZE = 1024;
   public static final byte[] END_SIGNAL = new byte[] {};
 
-  private final BlockingQueue<byte[]> queue = new LinkedBlockingDeque<> ();
+  private final BlockingQueue<byte[]> queue = new LinkedBlockingDeque<> (4);
 
   private final byte[] buffer;
-
+  
   private boolean closed = false;
 
   private int count = 0;
+  
+  private Display display = null;
+  
+  // DEBUG start
+  private int indicatorCount = 0;
+  // DEBUG end
 
   public QueueOutputStream () {
     this (DEFAULT_BUFFER_SIZE);
@@ -45,8 +54,6 @@ public class QueueOutputStream extends OutputStream {
       throw new IllegalStateException ("Stream is closed");
     }
     
-    // // DEBUG
-    // System.out.print ("#" + (new String (byteBuffer, offset, len)) + "#");
     int endOffset = offset + len;
     for (int i = offset; i < endOffset; ++i) {
       addToBuffer (byteBuffer[i]);
@@ -59,9 +66,6 @@ public class QueueOutputStream extends OutputStream {
       throw new IllegalStateException ("Stream is closed");
     }
 
-    // // DEBUG
-    // System.out.print ("^" + (new String (byteBuffer)) + "^");
-    
     int len = byteBuffer.length;
     for (int i = 0; i < len; ++i) {
       addToBuffer (byteBuffer[i]);
@@ -79,12 +83,21 @@ public class QueueOutputStream extends OutputStream {
   @Override
   public synchronized void close () throws IOException {
     flushBuffer ();
-    queue.offer (END_SIGNAL);
+    
+    try {
+      queue.put (END_SIGNAL);
+    } catch (InterruptedException e) {
+      throw (new RuntimeException ("QueueOutputStream got InterruptedException, see cause", e));
+    }
     closed = true;
   }
 
   public BlockingQueue<byte[]> getQueue () {
     return queue;
+  }
+
+  public void setDisplay (Display display) {
+    this.display = display;
   }
 
   private void addToBuffer (final int singleByte) {
@@ -98,12 +111,25 @@ public class QueueOutputStream extends OutputStream {
     if (count > 0) {
       final byte[] copy = new byte[count];
       System.arraycopy (buffer, 0, copy, 0, count);
+      
       try {
         queue.put (copy);
       } catch (InterruptedException e) {
         throw (new RuntimeException ("QueueOutputStream got InterruptedException, see cause", e));
       }
+      if (display != null) {
+        display.wake (); // wake up the display, it has data to process
+      }
       count = 0;
     }
+  }
+
+  public void debugInOutIndicator (String inOut) {
+    indicatorCount += inOut.length ();
+    if (indicatorCount >= DEBUG_INDICATOR_LINE_SIZE) {
+      System.out.print ('\n');
+      indicatorCount = 0;
+    }
+    System.out.print (inOut);
   }
 }
